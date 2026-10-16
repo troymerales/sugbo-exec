@@ -1,0 +1,10 @@
+{
+  "name": "sugbodoc-executive-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}

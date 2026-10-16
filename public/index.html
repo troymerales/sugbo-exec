@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SugboDoc Executive Overview</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f5f6f7; --card: #ffffff; --border: #e3e5e8;
+    --text: #15181c; --text-2: #4f5560; --muted: #7a808a; --grid: #eceef1;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --neutral: #a3a9b2;
+    --highlight: rgba(42, 120, 214, 0.07); --forecast-bg: rgba(122, 128, 138, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121315; --card: #1a1b1e; --border: #2c2e33;
+      --text: #eeeff1; --text-2: #b9bdc4; --muted: #8b9099; --grid: #26282c;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --neutral: #6b717a;
+      --highlight: rgba(57, 135, 229, 0.12); --forecast-bg: rgba(255, 255, 255, 0.04);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  .sub { color: var(--text-2); margin-top: 4px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--s2); border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; margin-left: 8px; vertical-align: 3px; }
+  label.filter { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+  select { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
+  h2 { font-size: 15px; font-weight: 650; margin: 32px 0 4px; }
+  .section-note { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .kpi, .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+  .kpi { padding: 14px 16px; }
+  .kpi .label { font-size: 12px; color: var(--text-2); }
+  .kpi .value { font-size: 24px; font-weight: 650; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+  .kpi .delta { font-size: 12px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+  .card { padding: 16px; min-width: 0; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h3 { font-size: 13.5px; font-weight: 600; margin: 0 0 2px; }
+  .card .desc { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+  .chart { position: relative; height: 240px; }
+  .chart.tall { height: 320px; }
+  .bars { display: grid; gap: 7px; font-size: 12.5px; }
+  .bar-row { display: grid; grid-template-columns: 150px 1fr 64px; gap: 8px; align-items: center; }
+  .bar-row .track { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+  .bar-row .fill { height: 100%; background: var(--s1); border-radius: 4px; }
+  .bar-row .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .stat { padding: 10px 12px; border-left: 3px solid var(--border); }
+  .stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 600; color: var(--text-2); font-size: 11.5px; }
+  .table-wrap { overflow-x: auto; }
+  .callout { font-size: 12.5px; color: var(--text-2); margin-top: 10px; }
+  details { margin-top: 32px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details dl { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 6px 16px; font-size: 12.5px; }
+  details dt { font-weight: 600; } details dd { margin: 0; color: var(--text-2); }
+  @media (max-width: 560px) { details dl { grid-template-columns: 1fr; } .bar-row { grid-template-columns: 110px 1fr 56px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>SugboDoc Executive Overview <span class="badge">Synthetic data</span></h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <label class="filter">Reporting period
+      <select id="period">
+        <option value="3">Last 3 months</option>
+        <option value="6">Last 6 months</option>
+        <option value="12" selected>Last 12 months</option>
+        <option value="24">All 24 months</option>
+      </select>
+    </label>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+
+  <h2>Business performance</h2>
+  <p class="section-note">Subscriptions are counted per facility account; branches and locations are not separate customers.</p>
+  <div class="grid">
+    <div class="card wide">
+      <h3>Monthly recurring revenue and 6-month forecast</h3>
+      <p class="desc" id="mrr-desc"></p>
+      <div class="chart tall"><canvas id="c-mrr"></canvas></div>
+    </div>
+    <div class="card"><h3>Active subscribed facilities by plan</h3><p class="desc">At each month end.</p><div class="chart"><canvas id="c-subs"></canvas></div></div>
+    <div class="card"><h3>New and cancelled facilities</h3><p class="desc">First subscriptions vs. cancellations per month.</p><div class="chart"><canvas id="c-flow"></canvas></div></div>
+    <div class="card"><h3>Plan and add-on mix</h3><p class="desc" id="mix-desc"></p><div class="bars" id="mix"></div><p class="callout" id="token-note"></p></div>
+  </div>
+
+  <h2>Product usage</h2>
+  <p class="section-note">Usage is recorded activity in SugboDoc. Volumes are normalised per rostered doctor where compared across facilities.</p>
+  <div class="card stats" id="usage-stats"></div>
+  <div class="grid">
+    <div class="card"><h3>Patient encounters by category</h3><p class="desc">OPD, IPD (incl. birthing-home deliveries), ER, Other.</p><div class="chart"><canvas id="c-enc"></canvas></div></div>
+    <div class="card"><h3>Adoption breadth</h3><p class="desc">Share of subscribed facilities that were active, and that used 4+ of 7 modules, each month.</p><div class="chart"><canvas id="c-adopt"></canvas></div></div>
+    <div class="card"><h3>Module adoption</h3><p class="desc" id="mod-desc"></p><div class="bars" id="modules"></div></div>
+    <div class="card wide"><h3>Usage intensity by segment</h3><p class="desc">Facility-months in period; medians. Segment = plan / rostered doctors in that month.</p><div class="table-wrap"><table id="seg"></table></div></div>
+  </div>
+
+  <h2>Retention and churn</h2>
+  <p class="section-note">Uses the full 24-month history for sample size. Comparisons are descriptive associations from observable usage, not causal effects.</p>
+  <div class="grid">
+    <div class="card"><h3>Monthly churn rate by plan</h3><p class="desc">Cancellations ÷ facilities on that plan at the start of each month, Months 1–24.</p><div class="chart"><canvas id="c-churn-plan"></canvas></div></div>
+    <div class="card"><h3>Churn rate by module breadth in the prior month</h3><p class="desc">Facility-months grouped by modules used in the preceding month.</p><div class="chart"><canvas id="c-churn-breadth"></canvas></div></div>
+    <div class="card"><h3>Activity before cancellation</h3><p class="desc" id="traj-desc"></p><div class="chart"><canvas id="c-traj"></canvas></div></div>
+    <div class="card wide"><h3>Engagement: retained vs. churned facilities</h3><p class="desc">Median of per-facility monthly averages.</p><div class="table-wrap"><table id="rvc"></table></div><p class="callout" id="rvc-note"></p></div>
+  </div>
+
+  <details>
+    <summary>Metric definitions and methodology</summary>
+    <dl id="defs"></dl>
+  </details>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
