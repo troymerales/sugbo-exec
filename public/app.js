@@ -3,7 +3,7 @@ import * as M from './metrics.js';
 const data = await (await fetch('data/dashboard.json')).json();
 const N = data.months.length;
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const C = { s1: css('--s1'), s2: css('--s2'), s3: css('--s3'), s4: css('--s4'), neutral: css('--neutral'), text2: css('--text-2'), muted: css('--muted'), grid: css('--grid'), highlight: css('--highlight'), forecastBg: css('--forecast-bg'), card: css('--card') };
+const C = { s1: css('--s1'), s2: css('--s2'), s3: css('--s3'), s4: css('--s4'), s5: css('--s5'), s6: css('--s6'), neutral: css('--neutral'), text2: css('--text-2'), muted: css('--muted'), grid: css('--grid'), highlight: css('--highlight'), forecastBg: css('--forecast-bg'), card: css('--card') };
 const PLAN_COLOR = { CLINIC_STARTER: C.s1, CLINIC_PRO: C.s2, BIRTHING_PRO: C.s3 };
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 });
@@ -24,7 +24,7 @@ Chart.defaults.plugins.legend.labels.boxWidth = 10;
 Chart.defaults.plugins.legend.labels.boxHeight = 10;
 Chart.defaults.plugins.tooltip.mode = 'index';
 Chart.defaults.plugins.tooltip.intersect = false;
-Chart.defaults.elements.line.borderWidth = 2;
+Chart.defaults.elements.line.borderWidth = 2.5;
 Chart.defaults.elements.point.radius = 0;
 Chart.defaults.elements.point.hoverRadius = 4;
 Chart.defaults.elements.bar.borderRadius = 3;
@@ -37,26 +37,25 @@ const axisTitle = text => ({ display: true, text, color: C.muted });
 // ---------- Static: MRR + forecast (full history always; forecast from all observed months) ----------
 function drawMrr() {
   const hist = M.range(1, N).map(m => M.mrrAt(data, m).total);
-  const fc = M.forecastMrr(hist, 6, 12);
+  const TEST = 4, trainEnd = N - TEST; // train Months 1–20, test Months 21–24
+  const fc = M.forecastMrr(hist.slice(0, trainEnd), TEST + 6, 12); // one forecast: Months 21–30
+  const mape = M.backtestMrr(hist, TEST, 12).mape;
   const labels = M.range(1, N + 6).map(monthLabel);
-  const pad = Array(N - 1).fill(null);
-  const last = hist[N - 1];
-  // Shade Months N-3..N (recent 4) and the forecast region; mark the origin.
+  const pad = Array(trainEnd - 1).fill(null), origin = hist[trainEnd - 1];
+  // Shade the test window and the forecast-only region; mark the forecast origin (Month 20).
   const regions = {
     id: 'regions',
     beforeDatasetsDraw(chart) {
       const { ctx, chartArea: a, scales: { x } } = chart;
-      const step = x.getPixelForValue(1) - x.getPixelForValue(0);
+      const xo = x.getPixelForValue(trainEnd - 1), xt = x.getPixelForValue(N - 1);
       ctx.save();
-      ctx.fillStyle = C.highlight;
-      const x0 = x.getPixelForValue(N - 4) - step / 2, xo = x.getPixelForValue(N - 1);
-      ctx.fillRect(x0, a.top, xo - x0, a.bottom - a.top);
-      ctx.fillStyle = C.forecastBg;
-      ctx.fillRect(xo, a.top, a.right - xo, a.bottom - a.top);
+      ctx.fillStyle = C.highlight; ctx.fillRect(xo, a.top, xt - xo, a.bottom - a.top);
+      ctx.fillStyle = C.forecastBg; ctx.fillRect(xt, a.top, a.right - xt, a.bottom - a.top);
       ctx.strokeStyle = C.muted; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(xo, a.top); ctx.lineTo(xo, a.bottom); ctx.stroke();
       ctx.setLineDash([]); ctx.fillStyle = C.muted; ctx.font = '11px ' + Chart.defaults.font.family;
-      ctx.textAlign = 'center'; ctx.fillText('Last 4 months', (x0 + xo) / 2, a.top + 12);
-      ctx.textAlign = 'left'; ctx.fillText('Forecast →', xo + 6, a.top + 12);
+      ctx.textAlign = 'right'; ctx.fillText(`Train · Months 1–${trainEnd}`, xo - 6, a.top + 12);
+      ctx.textAlign = 'center'; ctx.fillText(`Test · ${trainEnd + 1}–${N}`, (xo + xt) / 2, a.top + 12);
+      ctx.textAlign = 'left'; ctx.fillText('Forecast →', xt + 6, a.top + 12);
       ctx.restore();
     },
   };
@@ -65,20 +64,23 @@ function drawMrr() {
     data: {
       labels,
       datasets: [
-        { label: 'Observed MRR', data: [...hist, ...Array(6).fill(null)], borderColor: C.s1, backgroundColor: C.s1 },
-        { label: 'Forecast', data: [...pad, last, ...fc.map(p => p.value)], borderColor: C.s1, borderDash: [6, 4], backgroundColor: C.s1 },
-        { label: '80% interval (high)', data: [...pad, last, ...fc.map(p => p.high)], borderWidth: 0, pointHoverRadius: 0, backgroundColor: C.highlight, fill: '+1' },
-        { label: '80% interval (low)', data: [...pad, last, ...fc.map(p => p.low)], borderWidth: 0, pointHoverRadius: 0, fill: false },
+        { label: 'Observed MRR', data: [...hist, ...Array(6).fill(null)], borderColor: C.s1, borderWidth: 3, fill: 'origin',
+          backgroundColor: ({ chart: { ctx, chartArea: ca } }) => { if (!ca) return C.s1 + '22'; const g = ctx.createLinearGradient(0, ca.top, 0, ca.bottom); g.addColorStop(0, C.s1 + '40'); g.addColorStop(1, C.s1 + '00'); return g; } },
+        { label: `Forecast (trained on Months 1–${trainEnd})`, data: [...pad, origin, ...fc.map(p => p.value)], borderColor: C.s1, borderDash: [2, 4], backgroundColor: C.s1 },
+        { label: '80% interval (high)', data: [...pad, origin, ...fc.map(p => p.high)], borderWidth: 0, pointHoverRadius: 0, backgroundColor: C.highlight, fill: '+1' },
+        { label: '80% interval (low)', data: [...pad, origin, ...fc.map(p => p.low)], borderWidth: 0, pointHoverRadius: 0, fill: false },
       ],
     },
     options: {
       plugins: {
         legend: { labels: { filter: i => i.datasetIndex < 2 } },
         tooltip: {
-          filter: i => i.raw != null && i.datasetIndex !== 3 && !(i.datasetIndex > 0 && i.dataIndex === N - 1),
+          filter: i => i.raw != null && i.datasetIndex !== 3 && !(i.datasetIndex > 0 && i.dataIndex === trainEnd - 1),
           callbacks: {
-            title: items => `${items[0].label} · Month ${items[0].dataIndex + 1}${items[0].dataIndex >= N ? ' (forecast)' : ''}`,
-            label: i => i.datasetIndex === 2 ? `80% interval: ${peso.format(fc[i.dataIndex - N].low)} – ${peso.format(i.raw)}` : `${i.dataset.label}: ${peso.format(i.raw)}`,
+            title: items => `${items[0].label} · Month ${items[0].dataIndex + 1}${items[0].dataIndex >= N ? ' (forecast)' : items[0].dataIndex >= trainEnd ? ' (test)' : ''}`,
+            label: i => i.datasetIndex === 2 ? `80% interval: ${peso.format(fc[i.dataIndex - trainEnd].low)} – ${peso.format(i.raw)}`
+              : i.datasetIndex === 1 && i.dataIndex < N ? `Forecast: ${peso.format(i.raw)} (error ${pct((i.raw - hist[i.dataIndex]) / hist[i.dataIndex])} vs actual)`
+              : `${i.dataset.label.replace(/ \(.*/, '')}: ${peso.format(i.raw)}`,
           },
         },
       },
@@ -87,9 +89,10 @@ function drawMrr() {
     plugins: [regions],
   });
   const slope = fc[0].slope;
-  $('mrr-desc').textContent = `Observed Months 1–${N} (solid) and Months ${N + 1}–${N + 6} forecast (dashed), shown for the full history regardless of the period filter. ` +
-    `Method: least-squares linear trend over the last 12 observed months (${slope >= 0 ? '+' : '−'}${peso.format(Math.abs(slope))}/month), projected from the last observed value; ` +
-    `shaded band = 80% interval from month-to-month variation; floored at ₱0. Illustrative only — computed from synthetic data, not a business prediction.`;
+  $('mrr-desc').textContent = `Observed MRR, Months 1–${N} (solid). One forecast (dotted), fitted on Months 1–${trainEnd} only and run from Month ${trainEnd} to Month ${N + 6}: ` +
+    `Months ${trainEnd + 1}–${N} are the test against actuals (MAPE ${pct(mape)}), Months ${N + 1}–${N + 6} are the forward forecast. ` +
+    `Method: least-squares linear trend over the 12 training months before the origin (${slope >= 0 ? '+' : '−'}${peso.format(Math.abs(slope))}/month), projected from the Month ${trainEnd} value; ` +
+    `band = 80% interval from month-to-month variation; floored at ₱0. Full history shown regardless of the period filter. Illustrative only — synthetic data, not a business prediction.`;
 }
 
 // ---------- Period-dependent sections ----------
@@ -102,15 +105,18 @@ function render(len) {
   const priorTxt = p ? `vs prior ${len} mo` : 'no prior period in data';
   const chg = (cur, prev) => !p || prev == null || cur == null ? priorTxt : prev === 0 ? `${priorTxt}: n/a` : `${cur >= prev ? '▲' : '▼'} ${Math.abs((cur - prev) / prev * 100).toFixed(1)}% ${priorTxt}`;
   const pp = (cur, prev) => !p || prev == null || cur == null ? priorTxt : `${cur >= prev ? '▲' : '▼'} ${Math.abs((cur - prev) * 100).toFixed(2)} pp ${priorTxt}`;
+  // Delta colour = business impact, not direction: 'good' / 'bad' / 'na' (no prior, n/a, or unchanged).
+  const tone = (cur, prev, lowerIsBetter = false) => !p || prev == null || cur == null || cur === prev ? 'na' : (cur > prev) !== lowerIsBetter ? 'good' : 'bad';
+  const toneChg = (cur, prev) => prev === 0 ? 'na' : tone(cur, prev); // chg() prints "n/a" when prior is 0
   const cards = [
-    ['Active subscribed facilities', int.format(k.subscribed), chg(k.subscribed, p?.subscribed), `At end of ${monthLabel(b)}`],
-    ['Monthly recurring revenue', peso.format(k.mrr), chg(k.mrr, p?.mrr), `At end of ${monthLabel(b)}`],
-    ['New facilities', int.format(k.newFacilities), chg(k.newFacilities, p?.newFacilities), 'First subscriptions in period'],
-    ['Facility churn rate (monthly)', pct(k.churn, 2), pp(k.churn, p?.churn), 'Avg. per month in period'],
-    ['Monthly active facilities', int.format(k.mau), chg(k.mau, p?.mau), `${monthLabel(b)}; ≥1 encounter`],
-    ['Patient encounters', int.format(k.encounters), chg(k.encounters, p?.encounters), 'Total in period'],
+    ['Active subscribed facilities', int.format(k.subscribed), chg(k.subscribed, p?.subscribed), `At end of ${monthLabel(b)}`, toneChg(k.subscribed, p?.subscribed)],
+    ['Monthly recurring revenue', peso.format(k.mrr), chg(k.mrr, p?.mrr), `At end of ${monthLabel(b)}`, toneChg(k.mrr, p?.mrr)],
+    ['New facilities', int.format(k.newFacilities), chg(k.newFacilities, p?.newFacilities), 'First subscriptions in period', toneChg(k.newFacilities, p?.newFacilities)],
+    ['Facility churn rate (monthly)', pct(k.churn, 2), pp(k.churn, p?.churn), 'Avg. per month in period', tone(k.churn, p?.churn, true)],
+    ['Monthly active facilities', int.format(k.mau), chg(k.mau, p?.mau), `${monthLabel(b)}; ≥1 encounter`, toneChg(k.mau, p?.mau)],
+    ['Patient encounters', int.format(k.encounters), chg(k.encounters, p?.encounters), 'Total in period', toneChg(k.encounters, p?.encounters)],
   ];
-  $('kpis').innerHTML = cards.map(([l, v, d, t]) => `<div class="kpi" title="${t}"><div class="label">${l}</div><div class="value">${v}</div><div class="delta">${d}</div></div>`).join('');
+  $('kpis').innerHTML = cards.map(([l, v, d, t, tn]) => `<div class="kpi" title="${t}"><div class="label">${l}</div><div class="value">${v}</div><div class="delta ${tn}">${d}</div></div>`).join('');
 
   // B2 subscribed by plan
   const subsByMonth = ms.map(m => [...M.subscribedAt(data, m).values()]);
@@ -194,6 +200,91 @@ function render(len) {
   $('seg').innerHTML = '<tr><th>Segment</th><th>Facility-months</th><th>% active</th><th>Active days / mo</th><th>Encounters / doctor / mo</th><th>Modules used</th></tr>' +
     seg.map(s => `<tr><td>${s.label}</td><td>${s.n}</td>${s.n ? `<td>${pct(s.activeShare, 0)}</td><td>${num(s.activeDays, 1)}</td><td>${num(s.encPerDoctor, 1)}</td><td>${num(s.modules, 1)}</td>` : '<td colspan="4">no facility-months</td>'}</tr>`).join('');
 
+  // Marketing analytics (social + website)
+  const CHANNEL_COLOR = { cold_calling: C.s1, facebook: C.s2, instagram: C.s3, linkedin: C.s4, website: C.s5, organic_direct: C.s5, referral: C.s6 };
+  const PLATFORM_NAME = { facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', organic_direct: 'Organic / direct' };
+  const platforms = ['facebook', 'instagram', 'linkedin'];
+  const social = M.socialSummary(data, a, b), web = M.websiteTotals(data, a, b);
+  const socialTot = k => social.reduce((t, x) => t + x[k], 0);
+  const socialRow = (p, m) => data.social_metrics.find(r => r.platform === p && r.month === data.months[m - 1].key);
+  $('mkt-stats').innerHTML = [
+    [int.format(web.sessions), 'Website sessions'],
+    [int.format(web.pageViews), 'Page views'],
+    [int.format(socialTot('engagements')), 'Social engagements (likes, comments, shares)'],
+    [pct(socialTot('engagements') / socialTot('impressions'), 2), 'Avg. social engagement rate'],
+    [int.format(socialTot('newFollowers')), 'New followers'],
+    [int.format(socialTot('linkClicks')), 'Link clicks to website'],
+  ].map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  const stackedOpts = (yTitle, fmt = v => int.format(v)) => ({ scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, title: axisTitle(yTitle) } }, plugins: { tooltip: { callbacks: { label: i => `${i.dataset.label}: ${fmt(i.raw)}`, footer: it => `Total: ${int.format(it.reduce((t, i) => t + i.raw, 0))}` } } } });
+  draw('c-social', {
+    type: 'bar',
+    data: { labels, datasets: platforms.map(p => ({ label: PLATFORM_NAME[p], data: ms.map(m => { const r = socialRow(p, m); return r.likes + r.comments + r.shares; }), backgroundColor: CHANNEL_COLOR[p], borderColor: C.card, borderWidth: { top: 2 }, borderSkipped: false })) },
+    options: stackedOpts('Engagements'),
+  });
+  draw('c-web', {
+    type: 'bar',
+    data: { labels, datasets: ['organic_direct', ...platforms].map(src => ({ label: PLATFORM_NAME[src], data: ms.map(m => data.website_traffic.find(r => r.source === src && r.month === data.months[m - 1].key).sessions), backgroundColor: CHANNEL_COLOR[src], borderColor: C.card, borderWidth: { top: 2 }, borderSkipped: false })) },
+    options: stackedOpts('Sessions'),
+  });
+  draw('c-eng-rate', {
+    type: 'line',
+    data: { labels, datasets: platforms.map(p => ({ label: PLATFORM_NAME[p], data: ms.map(m => { const r = socialRow(p, m); return (r.likes + r.comments + r.shares) / r.impressions * 100; }), borderColor: CHANNEL_COLOR[p], backgroundColor: CHANNEL_COLOR[p] })) },
+    options: { scales: { y: { beginAtZero: true, ticks: { callback: v => v + '%' }, title: axisTitle('Engagement rate') }, x: { grid: { display: false } } }, plugins: { tooltip: { callbacks: { label: i => `${i.dataset.label}: ${i.raw.toFixed(2)}%` } } } },
+  });
+  $('social').innerHTML = '<tr><th>Platform</th><th>Followers (end)</th><th>New followers</th><th>Impressions</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Engagements</th><th>Engagement rate</th><th>Link clicks</th></tr>' +
+    social.map(x => `<tr><td>${PLATFORM_NAME[x.platform]}</td><td>${int.format(x.followers)}</td><td>${int.format(x.newFollowers)}</td><td>${int.format(x.impressions)}</td><td>${int.format(x.likes)}</td><td>${int.format(x.comments)}</td><td>${int.format(x.shares)}</td><td>${int.format(x.engagements)}</td><td>${pct(x.engagementRate, 2)}</td><td>${int.format(x.linkClicks)}</td></tr>`).join('');
+  $('social-desc').textContent = `${periodName}. Followers at end of ${monthLabel(b)}. Link clicks land on the website and appear there as sessions from that platform.`;
+
+  // Lead generation funnel (lead cohort engaged in period)
+  const sk = M.funnelSankey(data, a, b);
+  const nodeTotals = {};
+  for (const f of sk.flows) { nodeTotals[f.to] = (nodeTotals[f.to] || 0) + f.flow; if (sk.column[f.from] === 0) nodeTotals[f.from] = (nodeTotals[f.from] || 0) + f.flow; }
+  const progress = new Set(['Engaged', ...M.STAGES.map(s => s[1]), 'Re-subscribed']);
+  const nodeColor = name => { const ch = data.channels.find(c => c.name === name); return ch ? CHANNEL_COLOR[ch.channel] : progress.has(name) ? C.s1 : C.neutral; };
+  draw('c-sankey', {
+    type: 'sankey',
+    data: { datasets: [{
+      data: sk.flows, column: sk.column, priority: { ...Object.fromEntries(data.channels.map((c, i) => [c.name, i])), [`Cancelled ≤ ${M.RESUB_DAYS} days`]: 0, 'Re-subscribed': 1 }, size: 'max', nodeWidth: 12, nodePadding: 36, borderWidth: 0,
+      labels: Object.fromEntries(Object.keys(nodeTotals).map(k => [k, `${k} · ${int.format(nodeTotals[k])}`])),
+      colorFrom: c => nodeColor(c.dataset.data[c.dataIndex].from), colorTo: c => nodeColor(c.dataset.data[c.dataIndex].to), colorMode: 'gradient',
+      color: C.text2, font: { size: 11.5 },
+    }] },
+    options: { plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: true, callbacks: { title: () => '', label: i => { const f = i.raw; const out = nodeTotals[f.from]; return `${f.from} → ${f.to}: ${int.format(f.flow)}${out ? ` (${pct(f.flow / out)} of ${f.from})` : ''}`; } } } } },
+  });
+  $('sankey-desc').textContent = `${int.format(sk.total)} leads first engaged ${periodName}. Re-subscribed = converted facilities still paying ${M.RESUB_DAYS} days later, plus lapsed leads (no demo, no trial, not converted) that came back and subscribed. Not shown: ${sk.tooRecent} conversion${sk.tooRecent === 1 ? '' : 's'} less than ${M.RESUB_DAYS} days old (too recent to tell) and ${sk.open} lead${sk.open === 1 ? '' : 's'} still in progress. Follows the engagement cohort, so totals differ from "New facilities" (counted by subscription start).`;
+
+  const chans = M.channelSummary(data, a, b);
+  const short = c => c.name.replace(' (organic/direct)', '');
+  draw('c-chan-convs', {
+    type: 'bar',
+    data: { labels: chans.map(short), datasets: [
+      { label: 'Converted', data: chans.map(c => c.converted_date), backgroundColor: chans.map(c => CHANNEL_COLOR[c.channel]) },
+      { label: 'Won back later', data: chans.map(c => c.wonBack), backgroundColor: chans.map(c => CHANNEL_COLOR[c.channel] + '80'), borderColor: C.card, borderWidth: { bottom: 2 }, borderSkipped: false },
+    ] },
+    options: { plugins: { tooltip: { callbacks: { label: i => `${i.dataset.label}: ${i.raw}`, footer: it => `${chans[it[0].dataIndex].customers} new facilities · ${pct(chans[it[0].dataIndex].conversionShare, 0)} of all` } } }, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: axisTitle('New paying facilities') } } },
+  });
+  draw('c-chan-conv', {
+    type: 'bar',
+    data: { labels: chans.map(short), datasets: [{ label: 'Lead-to-customer', data: chans.map(c => c.leadToCustomer == null ? null : c.leadToCustomer * 100), backgroundColor: chans.map(c => CHANNEL_COLOR[c.channel]) }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: i => `${i.raw.toFixed(1)}% · ${chans[i.dataIndex].converted_date} of ${int.format(chans[i.dataIndex].leads)} leads` } } }, scales: { y: { beginAtZero: true, ticks: { callback: v => v + '%' }, title: axisTitle('Converted ÷ engaged leads') }, x: { grid: { display: false } } } },
+  });
+
+  const all = M.funnelCounts(data, M.leadsIn(data, a, b));
+  const stageSteps = M.STAGES.slice(1).map(([col, label], i) => [`${M.STAGES[i][1]} → ${label}`, all[M.STAGES[i][0]] ? all[col] / all[M.STAGES[i][0]] : null]);
+  const matured = all.resubscribed + all.cancelled;
+  stageSteps.push(['Converted → Re-subscribed', matured ? all.resubscribed / matured : null]);
+  const lapsed = all.inquired_date - all.converted_date - all.open;
+  stageSteps.push(['Lapsed → Won back', lapsed > 0 ? all.wonBack / lapsed : null]);
+  $('stage-bars').innerHTML = stageSteps.map(([l, v]) => bar(l, v, pct(v, 0))).join('') +
+    `<p class="callout">Re-subscribed rate excludes conversions with fewer than ${M.RESUB_DAYS} days of follow-up.</p>`;
+
+  const chanRow = (name, c, unit) => `<td>${name}</td><td>${c.volume == null ? 'n/a' : `${int.format(c.volume)} <span style="color:var(--muted)">${unit}</span>`}</td><td>${int.format(c.leads)}</td><td>${c.volumeToLead == null ? 'n/a' : pct(c.volumeToLead)}</td><td>${c.inquired_date}</td><td>${c.demo_date}</td><td>${c.trial_start_date}</td><td>${c.converted_date}</td><td>${c.wonBack}</td><td>${pct(c.conversionShare, 0)}</td><td>${pct(c.leadToCustomer)}</td><td>${pct(c.resubRate, 0)}</td><td>${peso.format(c.planMrr)}</td>`;
+  const totals = Object.fromEntries(['leads', 'inquired_date', 'demo_date', 'trial_start_date', 'converted_date', 'wonBack', 'resubscribed', 'cancelled', 'planMrr'].map(k => [k, chans.reduce((t, c) => t + c[k], 0)]));
+  Object.assign(totals, { volume: null, volumeToLead: null, conversionShare: totals.converted_date ? 1 : null, leadToCustomer: totals.leads ? totals.converted_date / totals.leads : null, resubRate: totals.resubscribed + totals.cancelled ? totals.resubscribed / (totals.resubscribed + totals.cancelled) : null });
+  $('chan').innerHTML = '<tr><th>Channel</th><th>Top-of-funnel volume</th><th>Engaged leads</th><th>Volume → lead</th><th>Inquired</th><th>Demo</th><th>Free trial</th><th>Converted</th><th>Won back</th><th>Share of new facilities</th><th>Lead → customer</th><th>Re-subscribed</th><th>Plan MRR now</th></tr>' +
+    chans.map(c => `<tr>${chanRow(c.name, c, c.volume_unit)}</tr>`).join('') + `<tr class="total">${chanRow('All channels', totals, '')}</tr>`;
+  $('chan-desc').textContent = `Top-of-funnel volume is in each channel's own unit (calls, site sessions, referrals) for ${periodName}, so it is not summed. Funnel columns follow the lead cohort engaged in the period. Plan MRR now = plan MRR at end of ${monthLabel(b)} from facilities converted from these leads (add-ons excluded). No spend data, so no CAC.`;
+
   $('subtitle').textContent = `Reporting period: ${periodName} · Data Months 1–${N} (${monthLabel(1)} – ${monthLabel(N)})`;
 }
 
@@ -245,7 +336,9 @@ const defs = [
   ['Module adoption', 'A module is used in a month if the facility created ≥1 record in it (encounter, clinical note, prescription, appointment, invoice, insurance claim, AI transaction). Breadth = number of the 7 modules used.'],
   ['Retention comparisons', 'Churned = cancelled within Months 1–24; retained = subscribed at end of Month 24. Per-facility monthly averages, then medians. Associations only; they do not establish that low engagement causes churn.'],
   ['Zero vs. n/a', 'Zero = facility was subscribed and recorded no activity. n/a = metric not applicable (e.g. no prior period inside the data, module not used, no facilities in segment).'],
-  ['MRR forecast', 'Least-squares linear trend fitted to the last 12 observed months, anchored at the last observed MRR so history and forecast join at Month 24, extended 6 months. 80% band = ±1.28·σ·√h with σ the spread of month-over-month changes around the trend; values floored at ₱0. Uses observed months only.'],
+  ['Marketing analytics', 'Social: impressions, likes, comments, shares, new followers and link clicks per platform per month. Engagements = likes + comments + shares; engagement rate = engagements ÷ impressions. Website: sessions and page views by source (organic/direct, Facebook, Instagram, LinkedIn).'],
+  ['Lead funnel', `Sources: cold calling, Facebook, Instagram, LinkedIn, website (organic/direct), referral. Engaged = identifiable facility prospect (interested call, form view, DM, referral). Inquired, Demo, Free trial (${data.trial_days} days) and Converted are stages reached by the end of the data; a converted lead becomes the facility's first subscription. Re-subscribed = still subscribed ${M.RESUB_DAYS} days after conversion, or a lapsed lead (dropped after inquiring) that came back 1–5 months later and subscribed ("won back"); won-back leads become facilities like converted ones. Cohort = first engagement in the period. Channel traffic, stage rates and single-source attribution are synthetic assumptions.`],
+  ['MRR forecast', 'One forecast line with a train/test split: least-squares linear trend fitted to Months 9–20 (the 12 months before the origin), anchored at the Month 20 value so it joins the actual series there, run through Month 30. Months 21–24 are compared with actuals (MAPE); Months 25–30 are the forward forecast. 80% band = ±1.28·σ·√h with σ the spread of month-over-month changes around the trend; values floored at ₱0. Uses observed months only.'],
   ['Data', `Synthetic, generated with seed ${data.generated_with_seed}. Prices are listed reference prices; discounts, annual billing and token bundle size (${int.format(data.assumptions.tokens_per_bundle)} tokens assumed) are modelling assumptions. Not actual SugboDoc customers.`],
 ];
 $('defs').innerHTML = defs.map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join('');

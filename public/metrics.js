@@ -97,6 +97,17 @@ export function forecastMrr(history, horizon = 6, window = 12) {
   }).map(p => ({ ...p, slope, sigma }));
 }
 
+/**
+ * Holdout backtest of the same method: fit on all but the last `test` months, forecast those months,
+ * compare with the actuals. MAPE = mean |actual − forecast| ÷ actual over the test months.
+ */
+export function backtestMrr(history, test = 4, window = 12) {
+  const train = history.slice(0, -test), actual = history.slice(-test);
+  const forecast = forecastMrr(train, test, window);
+  const errs = forecast.map((p, i) => actual[i] > 0 ? Math.abs(actual[i] - p.value) / actual[i] : null).filter(e => e != null);
+  return { trainEnd: train.length, forecast, actual, mape: errs.length ? sum(errs) / errs.length : null };
+}
+
 // ---------------- Product usage ----------------
 export const sizeBand = docs => docs <= 1 ? '1 doctor' : docs <= 3 ? '2–3 doctors' : '4+ doctors';
 
@@ -208,3 +219,97 @@ export function churnByBreadth(data) {
   }
   return bands.map(b => ({ ...b, rate: b.base ? b.churned / b.base : null }));
 }
+
+// ---------------- Acquisition funnel & marketing channels ----------------
+export const STAGES = [['engaged_date', 'Engaged'], ['inquired_date', 'Inquired'], ['demo_date', 'Demo'], ['trial_start_date', 'Free trial'], ['converted_date', 'Converted']];
+const STAGE_DROP = ['No inquiry', 'No demo', 'No trial', 'Not converted'];
+export const RESUB_DAYS = 90;
+const addDays = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+
+/** Leads (funnel cohort) whose first engagement falls in months a..b. */
+export const leadsIn = (data, a, b, channel = null) =>
+  data.leads.filter(l => l.engaged_date >= monthIso(data, a) && l.engaged_date < monthIso(data, b + 1) && (!channel || l.channel === channel));
+
+/** Converted lead -> 'resubscribed' (facility still subscribed 90 days after conversion), 'cancelled', or 'too_recent'. */
+export function resubStatus(data, lead) {
+  const d = addDays(lead.converted_date, RESUB_DAYS);
+  if (d >= monthIso(data, data.months.length + 1)) return 'too_recent';
+  return data.subscriptions.some(s => s.facility_id === lead.facility_id && s.start_date <= d && (s.end_date == null || d < s.end_date)) ? 'resubscribed' : 'cancelled';
+}
+
+/** Stage counts for a set of leads. A lead counts at every stage it reached by the end of the data. */
+export function funnelCounts(data, leads) {
+  const out = Object.fromEntries(STAGES.map(([col]) => [col, leads.filter(l => l[col] != null).length]));
+  const conv = leads.filter(l => l.converted_date).map(l => resubStatus(data, l));
+  return { ...out, open: leads.filter(l => l.outcome === 'open').length, wonBack: leads.filter(l => l.outcome === 'won_back').length, resubscribed: conv.filter(s => s === 'resubscribed').length, cancelled: conv.filter(s => s === 'cancelled').length, tooRecent: conv.filter(s => s === 'too_recent').length };
+}
+
+/** Last stage a lead reached (column name). */
+const lastStage = l => [...STAGES].reverse().find(([col]) => l[col] != null)[0];
+
+/**
+ * Sankey flows: channel -> Engaged -> ... -> Converted, with drop-off exits. "Re-subscribed" receives
+ * converted facilities still paying after 90 days AND lapsed leads (no demo / no trial / not converted)
+ * that came back and subscribed later (won back). Leads still in progress, and conversions too recent to
+ * judge, are left out of the flows (counts in `open` and `tooRecent`).
+ */
+export function funnelSankey(data, a, b) {
+  const leads = leadsIn(data, a, b), flows = [];
+  const add = (from, to, flow) => { if (flow > 0) flows.push({ from, to, flow }); };
+  for (const c of data.channels) add(c.name, 'Engaged', leads.filter(l => l.channel === c.channel).length);
+  STAGES.slice(0, -1).forEach(([col, label], i) => {
+    const [nextCol, nextLabel] = STAGES[i + 1];
+    add(label, nextLabel, leads.filter(l => l[nextCol] != null).length);
+    add(label, STAGE_DROP[i], leads.filter(l => l[col] != null && l[nextCol] == null && l.outcome !== 'open').length);
+  });
+  STAGES.slice(1).forEach(([col], i) => add(STAGE_DROP[i], 'Re-subscribed', leads.filter(l => l.outcome === 'won_back' && STAGES[STAGES.findIndex(s => s[0] === lastStage(l)) + 1][0] === col).length));
+  const f = funnelCounts(data, leads);
+  add('Converted', 'Re-subscribed', f.resubscribed);
+  add('Converted', `Cancelled ≤ ${RESUB_DAYS} days`, f.cancelled);
+  const column = { Engaged: 1, Inquired: 2, 'No inquiry': 2, Demo: 3, 'No demo': 3, 'Free trial': 4, 'No trial': 4, Converted: 5, 'Not converted': 5, 'Re-subscribed': 6, [`Cancelled ≤ ${RESUB_DAYS} days`]: 6, 'Too recent to tell': 6 };
+  for (const c of data.channels) column[c.name] = 0;
+  return { flows, column, total: leads.length, open: f.open, tooRecent: f.tooRecent };
+}
+
+const inMonths = (data, a, b) => r => r.month >= monthIso(data, a).slice(0, 7) && r.month < monthIso(data, b + 1).slice(0, 7);
+
+/** Top-of-funnel volume for a channel in months a..b: site sessions (digital), calls made, or referrals received (= referral leads). */
+export function channelVolume(data, c, a, b) {
+  if (c.channel === 'cold_calling') return sum(data.outbound_calls.filter(inMonths(data, a, b)).map(r => r.calls_made));
+  if (c.channel === 'referral') return leadsIn(data, a, b, 'referral').length;
+  const source = c.channel === 'website' ? 'organic_direct' : c.channel;
+  return sum(data.website_traffic.filter(r => r.source === source && inMonths(data, a, b)(r)).map(r => r.sessions));
+}
+
+/** Per-channel funnel and revenue for the lead cohort engaged in months a..b. Plan MRR = at end of b, from facilities converted from these leads. */
+export function channelSummary(data, a, b) {
+  const subsEnd = subscribedAt(data, b);
+  const rows = data.channels.map(c => {
+    const leads = leadsIn(data, a, b, c.channel), f = funnelCounts(data, leads);
+    const volume = channelVolume(data, c, a, b), matured = f.resubscribed + f.cancelled;
+    return {
+      ...c, volume, leads: leads.length, ...f,
+      volumeToLead: volume ? leads.length / volume : null,
+      leadToCustomer: leads.length ? f.converted_date / leads.length : null,
+      resubRate: matured ? f.resubscribed / matured : null,
+      planMrr: sum(leads.filter(l => l.facility_id && subsEnd.has(l.facility_id)).map(l => planMrr(data, subsEnd.get(l.facility_id)))),
+    };
+  });
+  const customers = sum(rows.map(r => r.converted_date + r.wonBack)); // new paying facilities from leads
+  return rows.map(r => ({ ...r, customers: r.converted_date + r.wonBack, conversionShare: customers ? (r.converted_date + r.wonBack) / customers : null }));
+}
+
+// ---------------- Marketing analytics (social + website) ----------------
+/** Per-platform social totals for months a..b. Engagements = likes + comments + shares; rate = engagements / impressions. */
+export function socialSummary(data, a, b) {
+  return [...new Set(data.social_metrics.map(r => r.platform))].map(platform => {
+    const rs = data.social_metrics.filter(r => r.platform === platform && inMonths(data, a, b)(r));
+    const t = k => sum(rs.map(r => r[k]));
+    const engagements = t('likes') + t('comments') + t('shares');
+    return { platform, followers: rs.at(-1)?.followers ?? null, newFollowers: t('new_followers'), impressions: t('impressions'), likes: t('likes'), comments: t('comments'), shares: t('shares'), engagements, engagementRate: t('impressions') ? engagements / t('impressions') : null, linkClicks: t('link_clicks') };
+  });
+}
+export const websiteTotals = (data, a, b) => {
+  const rs = data.website_traffic.filter(inMonths(data, a, b));
+  return { sessions: sum(rs.map(r => r.sessions)), pageViews: sum(rs.map(r => r.page_views)) };
+};

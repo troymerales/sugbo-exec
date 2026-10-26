@@ -11,6 +11,11 @@
 // shows is therefore built in through these shared causes; the cancellation outcome itself is never
 // used to shape engagement. A usage-independent closure hazard produces high-usage churners.
 //
+// ACQUISITION: new facilities come from a simulated lead funnel (cold calls, social, website, referrals -> engaged ->
+// inquired -> demo -> 14-day free trial -> converted). Each converted lead IS a facility; its
+// subscription starts on the conversion date. The pre-window base (45 facilities) has no lead record;
+// Month-0 warm-up leads may convert just before Month 1.
+//
 // Run: node scripts/generate.mjs   (seeded, fully reproducible)
 
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -41,6 +46,30 @@ export const ADDONS = [
   { addon_id: 'TOKEN', name: 'SugboDoc Token', price: 336, recurring: false },
 ];
 export const MODULES = ['encounters', 'clinical_notes', 'prescriptions', 'appointments', 'invoicing', 'insurance_claims', 'ai_assist'];
+// ASSUMPTIONS (marketing): all volumes and rates are illustrative, not SugboDoc figures. No ad-spend data -> no CAC.
+// Funnel sources. Top-of-funnel volume per month: site sessions from that source (digital), calls made
+// (cold calling) or referrals received (referral). `engage` = share of that volume that becomes an engaged
+// lead (identifiable facility prospect). Stage probabilities follow. Each lead has one source channel.
+export const CHANNELS = [
+  { channel: 'cold_calling', name: 'Cold calling', volume_unit: 'calls made', engage: 0.02, inquire: 0.5, demo: 0.6, trial: 0.6, convert: 0.5 },
+  { channel: 'facebook', name: 'Facebook', volume_unit: 'site sessions', engage: 0.013, inquire: 0.21, demo: 0.5, trial: 0.55, convert: 0.4 },
+  { channel: 'instagram', name: 'Instagram', volume_unit: 'site sessions', engage: 0.013, inquire: 0.16, demo: 0.45, trial: 0.5, convert: 0.35 },
+  { channel: 'linkedin', name: 'LinkedIn', volume_unit: 'site sessions', engage: 0.014, inquire: 0.34, demo: 0.6, trial: 0.62, convert: 0.5 },
+  { channel: 'website', name: 'Website (organic/direct)', volume_unit: 'site sessions', engage: 0.0064, inquire: 0.29, demo: 0.55, trial: 0.6, convert: 0.45 },
+  { channel: 'referral', name: 'Referral', volume_unit: 'referrals received', engage: 1, inquire: 0.7, demo: 0.7, trial: 0.7, convert: 0.6 },
+];
+// Social platforms (marketing analytics). Month-0 baselines; Facebook has the largest audience and engagement.
+// Rates are per impression. Link clicks land on the website (85% become sessions).
+export const SOCIAL = [
+  { platform: 'facebook', followers0: 12000, impressions0: 60000, growth: 0.02, like: 0.045, comment: 0.006, share: 0.004, click: 0.014, follow: 0.002 },
+  { platform: 'instagram', followers0: 6500, impressions0: 42000, growth: 0.03, like: 0.035, comment: 0.003, share: 0.0015, click: 0.012, follow: 0.003 },
+  { platform: 'linkedin', followers0: 3000, impressions0: 15000, growth: 0.025, like: 0.02, comment: 0.002, share: 0.0015, click: 0.02, follow: 0.0025 },
+];
+const ORGANIC_SESSIONS0 = 1500, CALLS0 = 480, REFERRALS0 = 1.45;
+export const TRIAL_DAYS = 14; // ASSUMPTION
+// Win-back: a lead that dropped after inquiring may come back 1–5 months later and subscribe ('won_back').
+// Probability by the stage it dropped at (ASSUMPTION): no demo, no trial, not converted after trial.
+const WINBACK = { demo_date: 0.1, trial_start_date: 0.15, converted_date: 0.25 };
 const OPTIONAL_MODULES = { prescriptions: 0.18, appointments: 0.1, invoicing: 0.12, insurance_claims: 0.07, ai_assist: 0.05 };
 
 // ---- date helpers (UTC day numbers; months indexed so that Month 1 = FIRST_MONTH) ----
@@ -65,21 +94,66 @@ export function generate(seed = SEED) {
   const T = {
     facilities: [], locations: [], doctors: [], nurses: [], patients: [], subscriptions: [], subscription_addons: [],
     encounters: [], appointments: [], clinical_notes: [], prescriptions: [], invoices: [], insurance_claims: [],
-    ai_transactions: [], token_purchases: [],
+    ai_transactions: [], token_purchases: [], social_metrics: [], website_traffic: [], outbound_calls: [], leads: [],
   };
   const ids = {};
   const nextId = (prefix) => `${prefix}-${String(ids[prefix] = (ids[prefix] || 0) + 1).padStart(6, '0')}`;
   const planById = Object.fromEntries(PLANS.map(p => [p.plan_id, p]));
 
-  // Onboarding schedule: an existing base (onboarded up to 18 months before Month 1) plus monthly acquisitions.
-  const starts = [];
-  for (let i = 0; i < 45; i++) starts.push(-17 + Math.floor(rand() * 18));
-  for (let m = 1; m <= N_MONTHS; m++) for (let k = poisson(3.4 + 0.12 * m); k > 0; k--) starts.push(m);
+  // ---- Lead funnel. Month 0 is a warm-up so Month 1 conversions aren't artificially low. ----
+  const WINDOW_END = monthStart(N_MONTHS + 1); // stage dates on/after this are not observed yet
+  const starts = []; // { day, lead }
+  const followers = {};
+  for (let m = 0; m <= N_MONTHS; m++) {
+    const mStart = monthStart(m), days = monthStart(m + 1) - mStart;
+    const season = 1 + 0.08 * Math.sin(2 * Math.PI * (m + 3) / 12);
+    const month = iso(mStart).slice(0, 7), noise = sd => Math.exp(normal(0, sd));
+    const volume = {}; // top-of-funnel volume per channel this month
+    for (const p of SOCIAL) {
+      const impressions = Math.round(p.impressions0 * (1 + p.growth) ** m * season * noise(0.12));
+      const new_followers = Math.round(impressions * p.follow * noise(0.2));
+      followers[p.platform] = (followers[p.platform] ?? p.followers0) + new_followers;
+      const link_clicks = Math.round(impressions * p.click * noise(0.15));
+      T.social_metrics.push({ month, platform: p.platform, followers: followers[p.platform], new_followers, impressions,
+        likes: Math.round(impressions * p.like * noise(0.15)), comments: Math.round(impressions * p.comment * noise(0.2)), shares: Math.round(impressions * p.share * noise(0.25)), link_clicks });
+      volume[p.platform] = Math.round(link_clicks * 0.85 * noise(0.05));
+    }
+    volume.website = Math.round(ORGANIC_SESSIONS0 * 1.02 ** m * season * noise(0.1));
+    for (const source of ['website', 'facebook', 'instagram', 'linkedin']) T.website_traffic.push({ month, source: source === 'website' ? 'organic_direct' : source, sessions: volume[source], page_views: Math.round(volume[source] * (2.1 + rand() * 0.6)) });
+    volume.cold_calling = Math.round(CALLS0 * 1.015 ** m * noise(0.1));
+    T.outbound_calls.push({ month, calls_made: volume.cold_calling });
+    volume.referral = REFERRALS0 * 1.03 ** m; // expected referrals; realised count = referral leads
+    for (const c of CHANNELS) {
+      for (let k = poisson(volume[c.channel] * c.engage); k > 0; k--) {
+        const lead = { lead_id: nextId('LEAD'), channel: c.channel, engaged_date: mStart + Math.floor(rand() * days), inquired_date: null, demo_date: null, trial_start_date: null, converted_date: null, resubscribed_date: null, outcome: 'lost', facility_id: null };
+        const quality = Math.exp(normal(0, 0.3)); // lead-level noise shared across stages
+        const steps = [['inquired_date', c.inquire, 1 + poisson(4)], ['demo_date', c.demo, 2 + poisson(6)], ['trial_start_date', c.trial, poisson(3)], ['converted_date', c.convert, TRIAL_DAYS]];
+        let day = lead.engaged_date;
+        for (const [col, p, lag] of steps) {
+          if (!chance(Math.min(0.95, p * quality))) {          // dropped at this stage
+            const back = day + 30 + Math.floor(rand() * 120);
+            if (WINBACK[col] && chance(WINBACK[col] * quality) && back < WINDOW_END) { lead.resubscribed_date = back; lead.outcome = 'won_back'; starts.push({ day: back, lead }); }
+            break;
+          }
+          day += lag;
+          if (day >= WINDOW_END) { lead.outcome = 'open'; break; } // next stage not reached yet
+          lead[col] = day;
+          if (col === 'converted_date') { lead.outcome = 'converted'; starts.push({ day, lead }); }
+        }
+        for (const col of ['engaged_date', 'inquired_date', 'demo_date', 'trial_start_date', 'converted_date', 'resubscribed_date']) if (lead[col] != null) lead[col] = iso(lead[col]);
+        T.leads.push(lead);
+      }
+    }
+  }
+  // Existing base: onboarded up to 18 months before Month 1 (no lead records).
+  for (let i = 0; i < 45; i++) { const m = -17 + Math.floor(rand() * 18); starts.push({ day: monthStart(m) + Math.floor(rand() * 28), lead: null }); }
+  starts.sort((a, b) => a.day - b.day);
 
-  for (const startMonth of starts) {
+  for (const { day: startDay, lead } of starts) {
     const fid = nextId('FAC');
+    if (lead) lead.facility_id = fid;
+    const startMonth = monthOfIso(iso(startDay));
     const type = chance(0.2) ? 'birthing_home' : 'clinic';
-    const startDay = monthStart(startMonth) + Math.floor(rand() * (monthStart(startMonth + 1) - monthStart(startMonth)));
 
     // ---- latent traits (hidden) ----
     const size = Math.exp(normal(0, 0.5));
@@ -305,6 +379,7 @@ export function buildDashboardData(T) {
   })).sort((a, b) => a.m - b.m || a.f.localeCompare(b.f));
 
   const strip = ({ subscription_id, ...s }) => s;
+  const inWindow = r => r.month >= FIRST_MONTH;
   return {
     note: 'SYNTHETIC DATA — generated for demonstration; does not represent actual SugboDoc customers.',
     generated_with_seed: SEED,
@@ -316,6 +391,12 @@ export function buildDashboardData(T) {
     subscriptions: T.subscriptions.map(strip),
     subscription_addons: T.subscription_addons.map(({ subscription_addon_id, ...a }) => a),
     usage,
+    channels: CHANNELS.map(({ channel, name, volume_unit }) => ({ channel, name, volume_unit })),
+    trial_days: TRIAL_DAYS,
+    social_metrics: T.social_metrics.filter(inWindow),
+    website_traffic: T.website_traffic.filter(inWindow),
+    outbound_calls: T.outbound_calls.filter(inWindow),
+    leads: T.leads.map(({ lead_id, ...l }) => l),
   };
 }
 
@@ -332,6 +413,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const [name, rows] of Object.entries(T)) writeFileSync(join(root, 'data', 'raw', `${name}.csv`), toCsv(rows));
   writeFileSync(join(root, 'data', 'raw', 'plans.csv'), toCsv(PLANS));
   writeFileSync(join(root, 'data', 'raw', 'addons.csv'), toCsv(ADDONS));
+  writeFileSync(join(root, 'data', 'raw', 'channels.csv'), toCsv(CHANNELS));
+  writeFileSync(join(root, 'data', 'raw', 'social_platforms.csv'), toCsv(SOCIAL));
   mkdirSync(join(root, 'public', 'data'), { recursive: true });
   writeFileSync(join(root, 'public', 'data', 'dashboard.json'), JSON.stringify(buildDashboardData(T)));
   console.log(Object.entries(T).map(([k, v]) => `${k}: ${v.length}`).join('\n'));

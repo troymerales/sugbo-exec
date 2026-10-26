@@ -149,6 +149,17 @@ test('forecast: anchored at last value, 6 months, uses only history, never negat
   fc.forEach(p => assert.ok(p.low <= p.value && p.value <= p.high));
 });
 
+test('backtest: trains on Months 1–20 only, forecasts 21–24 from Month 20, reports MAPE', () => {
+  const hist = M.range(1, 24).map(m => M.mrrAt(D, m).total);
+  const bt = M.backtestMrr(hist, 4, 12);
+  assert.equal(bt.trainEnd, 20);
+  assert.deepEqual(bt.forecast.map(p => p.month), [21, 22, 23, 24]);
+  assert.deepEqual(bt.forecast, M.forecastMrr(hist.slice(0, 20), 4, 12), 'uses training months only');
+  assert.ok(Math.abs(bt.forecast[0].value - (hist[19] + bt.forecast[0].slope)) < 1e-6, 'diverges from the Month 20 value');
+  const mape = bt.forecast.reduce((t, p, i) => t + Math.abs(hist[20 + i] - p.value) / hist[20 + i], 0) / 4;
+  assert.ok(Math.abs(bt.mape - mape) < 1e-12);
+});
+
 test('synthetic data contains the required mixed behaviours', () => {
   const churned = T.subscriptions.filter(s => s.end_reason === 'cancelled');
   assert.ok(churned.length >= 20, 'enough cancellations');
@@ -158,4 +169,58 @@ test('synthetic data contains the required mixed behaviours', () => {
   assert.ok(r.churnedAboveMedianShare > 0.1, 'some high-usage facilities churn');
   const lowRetained = D.usage.filter(u => u.m === 24 && u.enc / u.rostered < 5).length;
   assert.ok(lowRetained > 0, 'some low-usage facilities stay subscribed');
+});
+
+test('lead funnel: ordered stages, no skipped stages, converted leads are exactly the acquired facilities', () => {
+  const cols = ['engaged_date', 'inquired_date', 'demo_date', 'trial_start_date', 'converted_date'];
+  const windowEnd = '2026-10-01';
+  for (const l of T.leads) {
+    for (let i = 1; i < cols.length; i++) {
+      if (l[cols[i]] != null) { assert.ok(l[cols[i - 1]] != null, 'no skipped stage'); assert.ok(l[cols[i]] >= l[cols[i - 1]], 'stage dates ordered'); }
+    }
+    assert.ok(cols.every(c => l[c] == null || l[c] < windowEnd), 'no stage after the end of the data');
+    assert.equal(l.outcome === 'converted', l.converted_date != null);
+    assert.equal(l.outcome === 'won_back', l.resubscribed_date != null);
+    if (l.resubscribed_date) { assert.ok(l.inquired_date && !l.converted_date); assert.ok(l.resubscribed_date > l.inquired_date && l.resubscribed_date < windowEnd); }
+    if (l.trial_start_date && l.converted_date) assert.equal(Date.parse(l.converted_date) - Date.parse(l.trial_start_date), 14 * 864e5);
+    assert.ok(['cold_calling', 'facebook', 'instagram', 'linkedin', 'website', 'referral'].includes(l.channel));
+  }
+  const converted = T.leads.filter(l => l.converted_date || l.resubscribed_date);
+  assert.equal(new Set(converted.map(l => l.facility_id)).size, converted.length);
+  for (const l of converted) assert.equal(periodsOf(l.facility_id)[0].start_date, l.converted_date ?? l.resubscribed_date, 'subscription starts on conversion / win-back');
+  assert.equal(T.leads.filter(l => l.facility_id && !l.converted_date && !l.resubscribed_date).length, 0);
+  assert.equal(T.facilities.length - converted.length, 45, 'only the pre-window base lacks a lead');
+});
+
+test('funnel metrics: Sankey conserves flow and matches stage counts', () => {
+  const { flows, total } = M.funnelSankey(D, 1, 24);
+  const inflow = n => flows.filter(f => f.to === n).reduce((t, f) => t + f.flow, 0);
+  const outflow = n => flows.filter(f => f.from === n).reduce((t, f) => t + f.flow, 0);
+  const leads = M.leadsIn(D, 1, 24), f0 = M.funnelCounts(D, leads);
+  const STAGE_NODES = [['engaged_date', 'Engaged'], ['inquired_date', 'Inquired'], ['demo_date', 'Demo'], ['trial_start_date', 'Free trial'], ['converted_date', 'Converted']];
+  const openAt = col => leads.filter(l => l.outcome === 'open' && [...STAGE_NODES].reverse().find(([c]) => l[c] != null)[0] === col).length;
+  assert.equal(inflow('Engaged'), total);
+  for (const [col, n] of STAGE_NODES) assert.equal(n === 'Engaged' ? total : inflow(n), outflow(n) + openAt(col) + (n === 'Converted' ? f0.tooRecent : 0), n);
+  assert.equal(inflow('Re-subscribed'), f0.resubscribed + f0.wonBack);
+  const f = M.funnelCounts(D, M.leadsIn(D, 1, 24));
+  assert.equal(inflow('Converted'), f.converted_date);
+  assert.equal(f.resubscribed + f.cancelled + f.tooRecent, f.converted_date);
+});
+
+test('marketing analytics: 24 months per platform/source, social clicks feed website sessions', () => {
+  assert.equal(D.social_metrics.length, 24 * 3);
+  assert.equal(D.website_traffic.length, 24 * 4);
+  assert.equal(D.outbound_calls.length, 24);
+  for (const r of D.social_metrics) {
+    assert.ok(r.likes >= 0 && r.comments >= 0 && r.shares >= 0 && r.impressions > r.likes);
+    const sessions = D.website_traffic.find(w => w.month === r.month && w.source === r.platform).sessions;
+    assert.ok(sessions <= r.link_clicks * 1.2, 'sessions from a platform come from its link clicks');
+  }
+});
+
+test('channel mix: cold calling converts the most, Facebook gets the most engagement', () => {
+  const conv = Object.fromEntries(M.channelSummary(D, 1, 24).map(c => [c.channel, c.customers]));
+  assert.equal(Object.entries(conv).sort((x, y) => y[1] - x[1])[0][0], 'cold_calling');
+  const eng = M.socialSummary(D, 1, 24).sort((x, y) => y.engagements - x.engagements);
+  assert.equal(eng[0].platform, 'facebook');
 });

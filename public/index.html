@@ -5,55 +5,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SugboDoc Executive Overview</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.12.1/dist/chartjs-chart-sankey.min.js"></script>
 <style>
   :root {
     color-scheme: light;
-    --bg: #f5f6f7; --card: #ffffff; --border: #e3e5e8;
-    --text: #15181c; --text-2: #4f5560; --muted: #7a808a; --grid: #eceef1;
-    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --neutral: #a3a9b2;
-    --highlight: rgba(42, 120, 214, 0.07); --forecast-bg: rgba(122, 128, 138, 0.06);
+    --bg: #f2f6f6; --card: #ffffff; --border: #dfe5e6;
+    --text: #13191c; --text-2: #4a535c; --muted: #646b75; --grid: #e9eef0;
+    --s1: #1f6fe0; --s2: #e8590c; --s3: #7b4fd6; --s4: #0e93ad; --s5: #d6457f; --s6: #c98a00; --neutral: #a0a8b1;
+    --highlight: rgba(31, 111, 224, 0.07); --forecast-bg: rgba(100, 107, 117, 0.06);
+    --brand: #0f766e; --brand-2: #0e7490; --brand-tint: #e3f3f1; --on-brand: #ffffff; --band-1: #0f766e; --band-2: #0e7490;
+    --good: #12703a; --good-bg: #e4f4ea; --bad: #b4232f; --bad-bg: #fcebec; --na-bg: #eff2f4;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 14px rgba(16, 24, 40, 0.06);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --bg: #121315; --card: #1a1b1e; --border: #2c2e33;
-      --text: #eeeff1; --text-2: #b9bdc4; --muted: #8b9099; --grid: #26282c;
-      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --neutral: #6b717a;
-      --highlight: rgba(57, 135, 229, 0.12); --forecast-bg: rgba(255, 255, 255, 0.04);
+      --bg: #0f1314; --card: #181d1f; --border: #283033;
+      --text: #eef1f2; --text-2: #b6bec4; --muted: #8d969d; --grid: #242b2e;
+      --s1: #3d84ea; --s2: #e0601c; --s3: #8f6ee8; --s4: #1497b0; --s5: #d4558a; --s6: #b07d0a; --neutral: #6b737b;
+      --highlight: rgba(61, 132, 234, 0.13); --forecast-bg: rgba(255, 255, 255, 0.04);
+      --brand: #2cc2b0; --brand-2: #22a5c4; --brand-tint: rgba(44, 194, 176, 0.12); --on-brand: #ffffff; --band-1: #115e59; --band-2: #155e75;
+      --good: #5fd68f; --good-bg: rgba(95, 214, 143, 0.13); --bad: #ff8a8f; --bad-bg: rgba(255, 138, 143, 0.13); --na-bg: rgba(255, 255, 255, 0.06);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 14px rgba(0, 0, 0, 0.25);
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
-  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; padding: 20px 22px; border-radius: 14px; color: var(--on-brand); background: linear-gradient(115deg, var(--band-1), var(--band-2)); box-shadow: var(--shadow); }
   h1 { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
-  .sub { color: var(--text-2); margin-top: 4px; }
-  .badge { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--s2); border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; margin-left: 8px; vertical-align: 3px; }
-  label.filter { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
-  select { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
-  h2 { font-size: 15px; font-weight: 650; margin: 32px 0 4px; }
+  .sub { color: var(--on-brand); opacity: .92; margin-top: 4px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--on-brand); background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 999px; padding: 1px 8px; margin-left: 8px; vertical-align: 3px; }
+  label.filter { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--on-brand); }
+  select { font: inherit; padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; background: var(--card); color: var(--text); }
+  h2 { font-size: 16px; font-weight: 700; margin: 36px 0 4px; display: flex; align-items: center; gap: 8px; }
+  h2::before { content: ""; width: 4px; height: 16px; border-radius: 2px; background: linear-gradient(var(--brand), var(--brand-2)); }
   .section-note { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
-  .kpi, .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
-  .kpi { padding: 14px 16px; }
+  .kpi, .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  .kpi { padding: 14px 16px; border-top: 3px solid var(--brand); }
   .kpi .label { font-size: 12px; color: var(--text-2); }
-  .kpi .value { font-size: 24px; font-weight: 650; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
-  .kpi .delta { font-size: 12px; color: var(--muted); }
+  .kpi .value { font-size: 26px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+  .kpi .delta { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--muted); background: var(--na-bg); }
+  .kpi .delta.good { color: var(--good); background: var(--good-bg); }
+  .kpi .delta.bad { color: var(--bad); background: var(--bad-bg); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
   .card { padding: 16px; min-width: 0; }
   .card.wide { grid-column: 1 / -1; }
-  .card h3 { font-size: 13.5px; font-weight: 600; margin: 0 0 2px; }
+  .card h3 { font-size: 13.5px; font-weight: 650; margin: 0 0 2px; }
   .card .desc { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
   .chart { position: relative; height: 240px; }
   .chart.tall { height: 320px; }
+  .chart.sankey { height: 520px; min-width: 860px; }
+  .scroll-x { overflow-x: auto; }
+  tr.total td { font-weight: 600; border-top: 1px solid var(--border); }
   .bars { display: grid; gap: 7px; font-size: 12.5px; }
   .bar-row { display: grid; grid-template-columns: 150px 1fr 64px; gap: 8px; align-items: center; }
-  .bar-row .track { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+  .bar-row .track { height: 9px; background: var(--grid); border-radius: 4px; overflow: hidden; }
   .bar-row .fill { height: 100%; background: var(--s1); border-radius: 4px; }
   .bar-row .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
-  .stat { padding: 10px 12px; border-left: 3px solid var(--border); }
-  .stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat { padding: 10px 12px; border-left: 3px solid var(--brand); background: linear-gradient(90deg, var(--brand-tint), transparent 70%); border-radius: 0 8px 8px 0; }
+  .stat .v { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .stat .l { font-size: 12px; color: var(--text-2); }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
   th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--grid); }
@@ -61,8 +74,8 @@
   th { font-weight: 600; color: var(--text-2); font-size: 11.5px; }
   .table-wrap { overflow-x: auto; }
   .callout { font-size: 12.5px; color: var(--text-2); margin-top: 10px; }
-  details { margin-top: 32px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
-  summary { cursor: pointer; font-weight: 600; }
+  details { margin-top: 32px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 16px; }
+  summary { cursor: pointer; font-weight: 600; color: var(--brand); }
   details dl { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 6px 16px; font-size: 12.5px; }
   details dt { font-weight: 600; } details dd { margin: 0; color: var(--text-2); }
   @media (max-width: 560px) { details dl { grid-template-columns: 1fr; } .bar-row { grid-template-columns: 110px 1fr 56px; } }
@@ -91,13 +104,37 @@
   <p class="section-note">Subscriptions are counted per facility account; branches and locations are not separate customers.</p>
   <div class="grid">
     <div class="card wide">
-      <h3>Monthly recurring revenue and 6-month forecast</h3>
+      <h3>Monthly recurring revenue and forecast (train Months 1–20, test 21–24)</h3>
       <p class="desc" id="mrr-desc"></p>
       <div class="chart tall"><canvas id="c-mrr"></canvas></div>
     </div>
     <div class="card"><h3>Active subscribed facilities by plan</h3><p class="desc">At each month end.</p><div class="chart"><canvas id="c-subs"></canvas></div></div>
     <div class="card"><h3>New and cancelled facilities</h3><p class="desc">First subscriptions vs. cancellations per month.</p><div class="chart"><canvas id="c-flow"></canvas></div></div>
     <div class="card"><h3>Plan and add-on mix</h3><p class="desc" id="mix-desc"></p><div class="bars" id="mix"></div><p class="callout" id="token-note"></p></div>
+  </div>
+
+  <h2>Marketing analytics</h2>
+  <p class="section-note">Owned social channels and website traffic. Engagements = likes + comments + shares; engagement rate = engagements ÷ impressions.</p>
+  <div class="card stats" id="mkt-stats"></div>
+  <div class="grid">
+    <div class="card"><h3>Social engagements by platform</h3><p class="desc">Likes, comments and shares per month.</p><div class="chart"><canvas id="c-social"></canvas></div></div>
+    <div class="card"><h3>Website sessions by source</h3><p class="desc">Organic/direct visits plus clicks from social posts.</p><div class="chart"><canvas id="c-web"></canvas></div></div>
+    <div class="card"><h3>Engagement rate by platform</h3><p class="desc">Engagements ÷ impressions, per month.</p><div class="chart"><canvas id="c-eng-rate"></canvas></div></div>
+    <div class="card wide"><h3>Platform performance</h3><p class="desc" id="social-desc"></p><div class="table-wrap"><table id="social"></table></div></div>
+  </div>
+
+  <h2>Lead generation funnel</h2>
+  <p class="section-note">Lead cohort = prospects whose first engagement falls in the reporting period, followed to the end of the data. Sources: cold calling, Facebook, Instagram, LinkedIn, website (organic/direct) and referral.</p>
+  <div class="grid">
+    <div class="card wide">
+      <h3>Lead funnel: engage → inquire → demo → free trial → convert → re-subscribe</h3>
+      <p class="desc" id="sankey-desc"></p>
+      <div class="scroll-x"><div class="chart sankey"><canvas id="c-sankey"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Conversions by channel</h3><p class="desc">Leads in the period cohort that became paying facilities.</p><div class="chart"><canvas id="c-chan-convs"></canvas></div></div>
+    <div class="card"><h3>Lead-to-customer rate by channel</h3><p class="desc">Converted ÷ engaged leads in the period cohort.</p><div class="chart"><canvas id="c-chan-conv"></canvas></div></div>
+    <div class="card"><h3>Stage conversion</h3><p class="desc">Share of the previous stage that progressed (all channels).</p><div class="bars" id="stage-bars"></div></div>
+    <div class="card wide"><h3>Channel performance</h3><p class="desc" id="chan-desc"></p><div class="table-wrap"><table id="chan"></table></div></div>
   </div>
 
   <h2>Product usage</h2>
